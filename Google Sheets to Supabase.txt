@@ -1,0 +1,84 @@
+const SUPABASE_URL = 'https://tfsimbugdbcqrwadiwbg.supabase.co';
+const SUPABASE_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRmc2ltYnVnZGJjcXJ3YWRpd2JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzAwOTk3OTIsImV4cCI6MjA0NTY3NTc5Mn0.OoyLtHdn8y32hCfocWQN669jeRQTEF5ZNi4qJ0Bj9cU';
+const TABLE_NAME = 'Bakery';
+
+function onEdit(e) {
+
+  // Get the active sheet and the range of the edited cell
+  const sheet = e.source.getActiveSheet();
+  const editedRow = e.range.getRow();
+  const lastRow = sheet.getLastRow();
+
+  // Ensure the edit is happening on the last row (or specify another condition if needed)
+  if (editedRow === lastRow) {
+
+    // Get the values from the columns
+    const rowData = sheet.getRange(editedRow, 2, 1, 15).getValues()[0]; // All columns
+
+    const q1 = rowData[1];
+    const q2 = rowData[2];
+    const q3 = rowData[3];
+    const q4 = rowData[4];
+    const q5 = rowData[5];
+    const q6 = rowData[6];
+    const q7 = rowData[7];
+    const q8 = rowData[8];
+    const q9 = rowData[9];
+    const q10 = rowData[10];
+    const q11 = rowData[11];
+    const q12 = rowData[12];
+    const q13 = rowData[13];
+    const username = rowData[14];
+
+    // Log the extracted values
+    Logger.log("q1: " + q1 + ", q2: " + q2 + ", q3: " + q3 + ", q4: " + q4 + ", q5: " + q5 + ", q6: " + q6 + ", q7: " + q7 + ", q8: " + q8 + ", q9: " + q9 + ", q10: " + q10 + ", q11: " + q11 + ", q12: " + q12 + ", q13: " + q13 + ", username: " + username);
+
+    // Proceed only if both columns have data
+    if (q1 && q2 && q3 && q4 && q5 && q6 && q7 && q8 && q9 && q10 && q11 && q12 && q13 && username) {
+
+      // Create the data object for Supabase
+      const dataObject = {
+        bakery_id: 0,
+        q1: q1,
+        q2: q2,
+        q3: q3,
+        q4: q4,
+        q5: q5,
+        q6: q6,
+        q7: q7,
+        q8: q8,
+        q9: q9,
+        q10: q10,
+        q11: q11,
+        q12: q12,
+        q13: q13,
+        username: username,
+        overview: "N/A"
+      };
+
+      Logger.log("Data Object: " + JSON.stringify(dataObject));  // Log the data object
+
+      // Send the data to Supabase
+      const endpoint = `${SUPABASE_URL}/rest/v1/${TABLE_NAME}`;
+      const payload = JSON.stringify(dataObject);  // Convert to JSON
+
+      const options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_API_KEY,
+          'Authorization': `Bearer ${SUPABASE_API_KEY}`
+        },
+        payload: payload
+      };
+
+      // Send the request to Supabase
+      const response = UrlFetchApp.fetch(endpoint, options);
+
+      // Log the response from Supabase
+      Logger.log(response.getContentText());
+    } else {
+      Logger.log("Some columns are empty. Trigger skipped.");
+    }
+  }
+}
