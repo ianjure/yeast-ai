@@ -18,13 +18,13 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain_core.prompts import PromptTemplate
 
 # Supabase Configuration
-SUPABASE_URL = "https://tfsimbugdbcqrwadiwbg.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRmc2ltYnVnZGJjcXJ3YWRpd2JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzAwOTk3OTIsImV4cCI6MjA0NTY3NTc5Mn0.OoyLtHdn8y32hCfocWQN669jeRQTEF5ZNi4qJ0Bj9cU"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # Messenger and Google API Configuration
-PAGE_ID = "488959514289720"
-PAGE_ACCESS_TOKEN = "EAAY6ZBeZAOy6gBOZCYM3DqOEsxPdEtXAZBerCUnoWIxi8B68ajvqiVWb6lgNLYIHQdR8zlXMSTJaDCNm1hDaGLcDIqZBsuQ5It2iGZCmDtccEyMs7QFKK62q3w6Dm2MzMpRzzhOoe4Wn4tMnihKkr9EIdTqi7GD2TchfeL6IJFz9XC9ZBihvBqK5UevzNrLxGQZCbRbSwyuFRgZDZD"
-GOOGLE_API_KEY = "AIzaSyCkoQCn0rlZuRaUZioYsuEAy9JFWrfInc0"
+PAGE_ID = os.getenv("PAGE_ID")
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Initialize Supabase, Pymessenger Bot and Flask App
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -61,14 +61,11 @@ def fetch_content(url, max_retries=5, backoff_factor=1.5):
 
 # Function: Create Embeddings for Page Content and Initialize the Vector Store
 def page_vector_store(texts):
-    # Convert each text into a Document object
     documents = [Document(page_content=text) for text in texts]
     
-    # Split documents into chunks
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     split_documents = text_splitter.split_documents(documents)
     
-    # Generate embeddings and create vector store
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
     vector_store = FAISS.from_documents(split_documents, embeddings)
     return vector_store
@@ -184,7 +181,7 @@ def categorize_message(llm, message):
 
 # Function: LLM Chain for Question Answering
 def answer_question(llm, overview, query):
-    relevant_docs = vector_store.similarity_search(query, k=5)
+    relevant_docs = doc_vector_store.similarity_search(query, k=5)
     context = "\n\n".join([doc.page_content for doc in relevant_docs])
     template = """
         You are Yeast AI, an AI that helps small local bakeries in the Philippines manage their finances.
@@ -305,6 +302,7 @@ def loan_check(llm, query, overview, record):
             {context_pl}
             {context_nl}
             """
+    print(context)
     template = """
         You are Yeast AI, an AI that helps small local bakeries in the Philippines manage their finances.
         Answer this question about loans and loan eligibility:
