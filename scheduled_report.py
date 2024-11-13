@@ -43,49 +43,50 @@ def generate_report(llm, overview, record, request):
     return result.content
 
 # Function: Get All User ID
-def get_user_ids():
+def get_id():
     response = supabase.table("Bakery").select("bakery_id").execute()
     user_ids = [user["bakery_id"] for user in response.data]
     return user_ids
 
 def send_report():
+    USER_IDS = get_id()
     today = datetime.utcnow()
     if today.day == 1:
-        for user_id in USER_IDS:
-            overview_found = supabase.table("Bakery").select("*").eq("bakery_id", user_id).execute()
+        for id in USER_IDS:
+            overview_found = supabase.table("Bakery").select("*").eq("bakery_id", id).execute()
             if overview_found.data:
                 overview = overview_found.data[0]["overview"]
-                record_found = supabase.table("Financial_Record").select("*").eq("bakery_id", sender_id).execute()
+                record_found = supabase.table("Financial_Record").select("*").eq("bakery_id", id).execute()
                 if record_found.data:
                     filtered_data = [{k: v for k, v in row.items() if k != "bakery_id"} for row in record_found.data]
                     headers = filtered_data[0].keys()
                     rows = [list(row.values()) for row in filtered_data]
                     record = tabulate(rows, headers=headers, tablefmt="grid")
-                    bot.send_text_message(sender_id, "Hello! Here's your monthly business report.")
-                    bot.send_text_message(sender_id, generate_report(llm, overview, record, "Generate a report for last month."))
-                    bot.send_text_message(sender_id, "Keep up the good work! Let's grow your bakery, one loaf at a time.")
+                    bot.send_text_message(id, "Hello! Here's your monthly business report.")
+                    bot.send_text_message(id, generate_report(llm, overview, record, "Generate a report for last month."))
+                    bot.send_text_message(id, "Keep up the good work! Let's grow your bakery, one loaf at a time.")
                 else:
-                    bot.send_text_message(sender_id, "Hello! Here's your monthly business report.")
-                    bot.send_text_message(sender_id, generate_report(llm, overview, "None", "Generate a report for last month."))
-                    bot.send_text_message(sender_id, "Keep up the good work! Let's grow your bakery, one loaf at a time.")
+                    bot.send_text_message(id, "Hello! Here's your monthly business report.")
+                    bot.send_text_message(id, generate_report(llm, overview, "None", "Generate a report for last month."))
+                    bot.send_text_message(id, "Keep up the good work! Let's grow your bakery, one loaf at a time.")
     else:
-        for user_id in USER_IDS:
-            overview_found = supabase.table("Bakery").select("*").eq("bakery_id", user_id).execute()
+        for id in USER_IDS:
+            overview_found = supabase.table("Bakery").select("*").eq("bakery_id", id).execute()
             if overview_found.data:
                 overview = overview_found.data[0]["overview"]
-                record_found = supabase.table("Financial_Record").select("*").eq("bakery_id", sender_id).execute()
+                record_found = supabase.table("Financial_Record").select("*").eq("bakery_id", id).execute()
                 if record_found.data:
                     filtered_data = [{k: v for k, v in row.items() if k != "bakery_id"} for row in record_found.data]
                     headers = filtered_data[0].keys()
                     rows = [list(row.values()) for row in filtered_data]
                     record = tabulate(rows, headers=headers, tablefmt="grid")
-                    bot.send_text_message(sender_id, "Hello! Here's your weekly business report.")
-                    bot.send_text_message(sender_id, generate_report(llm, overview, record, "Generate a report for last week."))
-                    bot.send_text_message(sender_id, "Keep up the good work! Let's grow your bakery, one loaf at a time.")
+                    bot.send_text_message(id, "Hello! Here's your weekly business report.")
+                    bot.send_text_message(id, generate_report(llm, overview, record, "Generate a report for last week."))
+                    bot.send_text_message(id, "Keep up the good work! Let's grow your bakery, one loaf at a time.")
                 else:
-                    bot.send_text_message(sender_id, "Hello! Here's your weekly business report.")
-                    bot.send_text_message(sender_id, generate_report(llm, overview, "None", "Generate a report for last week."))
-                    bot.send_text_message(sender_id, "Keep up the good work! Let's grow your bakery, one loaf at a time.")
+                    bot.send_text_message(id, "Hello! Here's your weekly business report.")
+                    bot.send_text_message(id, generate_report(llm, overview, "None", "Generate a report for last week."))
+                    bot.send_text_message(id, "Keep up the good work! Let's grow your bakery, one loaf at a time.")
 
 if __name__ == "__main__":
     send_report()
