@@ -7,13 +7,12 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 
 # Supabase Configuration
-SUPABASE_URL = "https://tfsimbugdbcqrwadiwbg.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRmc2ltYnVnZGJjcXJ3YWRpd2JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzAwOTk3OTIsImV4cCI6MjA0NTY3NTc5Mn0.OoyLtHdn8y32hCfocWQN669jeRQTEF5ZNi4qJ0Bj9cU"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # Messenger and Google API Configuration
-PAGE_ID = "488959514289720"
-PAGE_ACCESS_TOKEN = "EAAY6ZBeZAOy6gBOZCYM3DqOEsxPdEtXAZBerCUnoWIxi8B68ajvqiVWb6lgNLYIHQdR8zlXMSTJaDCNm1hDaGLcDIqZBsuQ5It2iGZCmDtccEyMs7QFKK62q3w6Dm2MzMpRzzhOoe4Wn4tMnihKkr9EIdTqi7GD2TchfeL6IJFz9XC9ZBihvBqK5UevzNrLxGQZCbRbSwyuFRgZDZD"
-GOOGLE_API_KEY = "AIzaSyCkoQCn0rlZuRaUZioYsuEAy9JFWrfInc0"
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Initialize LLM Model, Supabase and Pymessenger Bot
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1, google_api_key=GOOGLE_API_KEY)
@@ -49,6 +48,7 @@ def get_id():
     user_ids = [user["bakery_id"] for user in response.data]
     return user_ids
 
+# Function: Send Report to Users
 def send_report():
     USER_IDS = get_id()
     today = datetime.utcnow()
