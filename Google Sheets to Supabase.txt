@@ -1,5 +1,5 @@
-const SUPABASE_URL = 'https://tfsimbugdbcqrwadiwbg.supabase.co';
-const SUPABASE_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRmc2ltYnVnZGJjcXJ3YWRpd2JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzAwOTk3OTIsImV4cCI6MjA0NTY3NTc5Mn0.OoyLtHdn8y32hCfocWQN669jeRQTEF5ZNi4qJ0Bj9cU';
+const SUPABASE_URL = 'SUPABASE_URL';
+const SUPABASE_API_KEY = 'SUPABASE_API_KEY';
 const TABLE_NAME = 'Bakery';
 
 function onEdit(e) {
