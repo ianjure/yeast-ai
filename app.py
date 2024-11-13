@@ -34,37 +34,33 @@ app = Flask(__name__)
 # Initialize LLM Model
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1, google_api_key=GOOGLE_API_KEY)
 
-# Function to fetch page content using Selenium with retries
-def fetch_content_with_selenium(url, max_retries=5, backoff_factor=1.5):
-    # Set up Chrome options for headless mode
+# Function: Fetch Page Content
+def fetch_content(url, max_retries=5, backoff_factor=1.5):
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
 
-    # Set up the Chrome WebDriver with custom timeouts
     service = ChromeService(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
-    driver.set_page_load_timeout(30)  # 30 seconds timeout for page load
+    driver.set_page_load_timeout(30)
 
     attempt = 0
     while attempt < max_retries:
         try:
-            # Attempt to open the URL
             driver.get(url)
-            # Wait for the page to load completely (you can add further waits for specific elements if needed)
-            time.sleep(5)  # Let the page load fully if necessary
-            content = driver.page_source  # Retrieve page source
-            return content  # Return the HTML content
+            time.sleep(5)
+            content = driver.page_source
+            return content
         except (TimeoutException, WebDriverException) as e:
             print(f"Attempt {attempt + 1} failed: {e}. Retrying in {backoff_factor ** attempt:.1f} seconds...")
             attempt += 1
             time.sleep(backoff_factor ** attempt)
-    
-    # Quit the driver and raise an error if all retries are exhausted
+            
     driver.quit()
     raise Exception(f"Failed to retrieve content from {url} after {max_retries} attempts.")
 
-def url_vector_store(texts):
+# Function: Create Embeddings for Page Content and Initialize the Vector Store
+def page_vector_store(texts):
     # Convert each text into a Document object
     documents = [Document(page_content=text) for text in texts]
     
@@ -86,7 +82,7 @@ def load_documents(pdf_folder):
             documents.extend(loader.load_and_split())
     return documents
 
-# Function: Create Embeddings and Initialize the Vector Store
+# Function: Create Embeddings for Documents and Initialize the Vector Store
 def document_vector_store(documents):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     split_documents = text_splitter.split_documents(documents)
@@ -97,23 +93,21 @@ def document_vector_store(documents):
 # Initialize Knowledge Base (Document)
 pdf_folder = "documents"
 documents = load_documents(pdf_folder)
-vector_store = document_vector_store(documents)
+doc_vector_store = document_vector_store(documents)
 
 # Initialize Knowledge Base (Website)
 personal_loan_url = 'https://www.banko.com.ph/products/instacashko-personal-loan/'
 negosyoko_loan_url = 'https://www.banko.com.ph/products/fund-your-business-with-banko/'
-
 try:
-    page_content = fetch_content_with_selenium(personal_loan_url)
-    print("Content fetched successfully!")
-    soup = BeautifulSoup(page_content, 'html.parser')
-    content = [p.text for p in soup.find_all('p')]
-    print(content)
-    vector_store = url_vector_store(content)
-    query = "How to avail the loan?"
-    relevant_docs = vector_store.similarity_search(query, k=5)
-    context = "\n\n".join([doc.page_content for doc in relevant_docs])
-    print(context)
+    page_content_pl = fetch_content(personal_loan_url)
+    soup_1 = BeautifulSoup(page_content_pl, 'html.parser')
+    content_pl = [p.text for p in soup_1.find_all('p')]
+    url_vector_store_pl = page_vector_store(content_pl)
+
+    page_content_nl = fetch_content(negosyoko_loan_url)
+    soup_2 = BeautifulSoup(page_content_nl, 'html.parser')
+    content_p2 = [p.text for p in soup_2.find_all('p')]
+    url_vector_store_nl = page_vector_store(content_p2)
 except Exception as e:
     print(e)
 
@@ -175,12 +169,13 @@ def categorize_message(llm, message):
         4. Profits and Expenses - if the user enters a profit and expense at the same time.
         5. Report - if the user wants to create a report.
         6. Status - if the user wants to check their business and financial status.
-        7. Loan - if the user wants to check their loan eligibility.
+        7. Loan - if the user wants to ask questions about loans or check their loan eligibility.
         8. Conversation - if the user message is not a clear question, just a reaction or greetings.
 
         Only answer one of these 8 categories. Please answer directly.
 
-        This is what the user sent: {message}
+        This is what the user sent:
+        {message}
         """
     prompt = PromptTemplate.from_template(template)
     chain = prompt | llm
@@ -198,7 +193,8 @@ def answer_question(llm, overview, query):
         This is the business overview of the bakery that you are helping:
         {overview}
 
-        Answer this question and provide solutions: {query}
+        Answer this question and provide solutions:
+        {query}
 
         Use this as additional context for your answer:
         {context}
@@ -248,7 +244,7 @@ def data_extract(llm, message):
     template = """
         Extract the profits and expenses from user input into a list.
         If the user did not input a profit or an expense, set it to zero.
-        Answer directly and follow this format: [profit,expenses]
+        Answer directly and strictly follow this format: [profit,expenses]
 
         This is what the user inputted: {message}
         """
@@ -258,7 +254,7 @@ def data_extract(llm, message):
     return result.content.replace(" ","").replace("[","").replace("]","")
 
 # Function: LLM Chain for Generating Report
-def generate_report(llm, overview, record):
+def generate_report(llm, overview, record, request):
     template = """
         You are Yeast AI, an AI that helps small local bakeries in the Philippines manage their finances.
 
@@ -268,13 +264,16 @@ def generate_report(llm, overview, record):
         Generate a report based on this financial record:
         {record}
 
+        Make sure that the report is correctly calculated and is inclined to this request:
+        {request}
+
         Make sure that your answer is simple and easy to understand without too much technical words.
         Answer only in 2-3 sentences and focus on the important insights.
         Act as if you are giving a small presentation to the user.
         """
     prompt = PromptTemplate.from_template(template)
     chain = prompt | llm
-    result = chain.invoke({"overview": overview, "record": record})
+    result = chain.invoke({"overview": overview, "record": record, "request": request})
     return result.content
 
 # Function: LLM Chain for Generating Business Status
@@ -284,7 +283,7 @@ def generate_status(llm, overview, record):
         Generate a business status based on this business overview:
         {overview}
         
-        Also, use this financial record:
+        Make sure to use this financial record:
         {record}
 
         Make sure that your answer is simple and easy to understand without too much technical words.
@@ -297,28 +296,36 @@ def generate_status(llm, overview, record):
     return result.content
 
 # Function: LLM Chain for Checking Loan Eligibility
-def loan_check(llm, overview, record):
-    context = """
-            
+def loan_check(llm, query, overview, record):
+    relevant_docs_pl = url_vector_store_pl.similarity_search(query, k=5)
+    relevant_docs_nl = url_vector_store_nl.similarity_search(query, k=5)
+    context_pl = "\n\n".join([doc.page_content for doc in relevant_docs_pl])
+    context_nl = "\n\n".join([doc.page_content for doc in relevant_docs_nl])
+    context = f"""
+            {context_pl}
+            {context_nl}
             """
     template = """
         You are Yeast AI, an AI that helps small local bakeries in the Philippines manage their finances.
-        Check if the business is eligible for a loan based on this business overview:
+        Answer this question about loans and loan eligibility:
+        {query}
+        
+        Tailor your answer based on this business overview:
         {overview}
         
-        And use this financial record:
+        And use this financial record to check if the user is eligible for a loan:
         {record}
 
         Use this as additional context for your answer:
         {context}
 
         Make sure that your answer is simple and easy to understand without too much technical words.
-        Answer only in 2-3 sentences and focus on the important insights.
+        Answer only in 3-5 sentences and focus on the important insights.
         Act as if you are giving a small presentation to the user.
         """
     prompt = PromptTemplate.from_template(template)
     chain = prompt | llm
-    result = chain.invoke({"overview": overview, "record": record, "context": context})
+    result = chain.invoke({"query": query, "overview": overview, "record": record, "context": context})
     return result.content
 
 # Function: LLM Chain for User Conversation
@@ -330,9 +337,10 @@ def converse(llm, overview, message):
         This is the business overview of the bakery that you are helping:
         {overview}
 
-        This is the user's message: {message}
+        This is the user message:
+        {message}
 
-        If the user's message is a reaction or a greeting, just answer in a simple way.
+        If the user message is a reaction or a greeting, just answer in a simple way.
         """
     prompt = PromptTemplate.from_template(template)
     chain = prompt | llm
@@ -446,9 +454,9 @@ def webhook():
                                     rows = [list(row.values()) for row in filtered_data]
                                     record = tabulate(rows, headers=headers, tablefmt="grid")
                                     print(record)
-                                    bot.send_text_message(sender_id, generate_report(llm, overview, record))
+                                    bot.send_text_message(sender_id, generate_report(llm, overview, record, message))
                                 else:
-                                    bot.send_text_message(sender_id, generate_report(llm, "None"))
+                                    bot.send_text_message(sender_id, generate_report(llm, overview, "None", message))
                         elif category == "status":
                             overview_found = supabase.table("Bakery").select("*").eq("bakery_id", sender_id).execute()
                             if overview_found.data:
@@ -474,9 +482,9 @@ def webhook():
                                     rows = [list(row.values()) for row in filtered_data]
                                     record = tabulate(rows, headers=headers, tablefmt="grid")
                                     print(record)
-                                    bot.send_text_message(sender_id, loan_check(llm, overview, record))
+                                    bot.send_text_message(sender_id, loan_check(llm, message, overview, record))
                                 else:
-                                    bot.send_text_message(sender_id, loan_check(llm, overview, "None"))
+                                    bot.send_text_message(sender_id, loan_check(llm, message, overview, "None"))
                         else:
                             overview_found = supabase.table("Bakery").select("*").eq("bakery_id", sender_id).execute()
                             if overview_found.data:
