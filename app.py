@@ -1,9 +1,20 @@
+import os
+import time
 from supabase import create_client, Client
 from datetime import datetime
 from flask import Flask, request
 from pymessenger import Bot
 from tabulate import tabulate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
+from langchain.schema import Document
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_core.prompts import PromptTemplate
 
 # Supabase Configuration
@@ -20,25 +31,91 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 bot = Bot(PAGE_ACCESS_TOKEN)
 app = Flask(__name__)
 
-# Function: Supabase Data Entry
-def save_data(profits: float, expenses: float):
-    data = {
-        "bakery_id": 1,
-        "profits": profits,
-        "expenses": expenses,
-        "date": str(datetime.now().date())
-    }
-    supabase.table("Financial_Record").insert(data).execute()
+# Initialize LLM Model
+llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1, google_api_key=GOOGLE_API_KEY)
 
-# Function: Supabase Data Update
-def update_data(profits: float, expenses: float):
-    data = {
-        "bakery_id": 1,
-        "profits": profits,
-        "expenses": expenses,
-        "date": str(datetime.now().date())
-    }
-    supabase.table("Financial_Record").update(data).eq("date", str(datetime.now().date())).execute()
+# Function to fetch page content using Selenium with retries
+def fetch_content_with_selenium(url, max_retries=5, backoff_factor=1.5):
+    # Set up Chrome options for headless mode
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+
+    # Set up the Chrome WebDriver with custom timeouts
+    service = ChromeService(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+    driver.set_page_load_timeout(30)  # 30 seconds timeout for page load
+
+    attempt = 0
+    while attempt < max_retries:
+        try:
+            # Attempt to open the URL
+            driver.get(url)
+            # Wait for the page to load completely (you can add further waits for specific elements if needed)
+            time.sleep(5)  # Let the page load fully if necessary
+            content = driver.page_source  # Retrieve page source
+            return content  # Return the HTML content
+        except (TimeoutException, WebDriverException) as e:
+            print(f"Attempt {attempt + 1} failed: {e}. Retrying in {backoff_factor ** attempt:.1f} seconds...")
+            attempt += 1
+            time.sleep(backoff_factor ** attempt)
+    
+    # Quit the driver and raise an error if all retries are exhausted
+    driver.quit()
+    raise Exception(f"Failed to retrieve content from {url} after {max_retries} attempts.")
+
+def url_vector_store(texts):
+    # Convert each text into a Document object
+    documents = [Document(page_content=text) for text in texts]
+    
+    # Split documents into chunks
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    split_documents = text_splitter.split_documents(documents)
+    
+    # Generate embeddings and create vector store
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
+    vector_store = FAISS.from_documents(split_documents, embeddings)
+    return vector_store
+
+# Function: Load and Process Documents
+def load_documents(pdf_folder):
+    documents = []
+    for pdf_file in os.listdir(pdf_folder):
+        if pdf_file.endswith(".pdf"):
+            loader = PyPDFLoader(os.path.join(pdf_folder, pdf_file))
+            documents.extend(loader.load_and_split())
+    return documents
+
+# Function: Create Embeddings and Initialize the Vector Store
+def document_vector_store(documents):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    split_documents = text_splitter.split_documents(documents)
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
+    vector_store = FAISS.from_documents(split_documents, embeddings)
+    return vector_store
+
+# Initialize Knowledge Base (Document)
+pdf_folder = "documents"
+documents = load_documents(pdf_folder)
+vector_store = document_vector_store(documents)
+
+# Initialize Knowledge Base (Website)
+personal_loan_url = 'https://www.banko.com.ph/products/instacashko-personal-loan/'
+negosyoko_loan_url = 'https://www.banko.com.ph/products/fund-your-business-with-banko/'
+
+try:
+    page_content = fetch_content_with_selenium(personal_loan_url)
+    print("Content fetched successfully!")
+    soup = BeautifulSoup(page_content, 'html.parser')
+    content = [p.text for p in soup.find_all('p')]
+    print(content)
+    vector_store = url_vector_store(content)
+    query = "How to avail the loan?"
+    relevant_docs = vector_store.similarity_search(query, k=5)
+    context = "\n\n".join([doc.page_content for doc in relevant_docs])
+    print(context)
+except Exception as e:
+    print(e)
 
 #Function: Send a Generic Message Template
 def send_generic_template(recipient_id):
@@ -46,7 +123,7 @@ def send_generic_template(recipient_id):
         {
             "title": "Welcome to Yeast AI!",
             "image_url": "https://i.imgur.com/3XN9LQF.jpeg",
-            "subtitle": "Let’s grow your business, one loaf at a time!",
+            "subtitle": "Let's grow your business, one loaf at a time!",
             "buttons": [
                 {
                     "type": "web_url",
@@ -92,14 +169,16 @@ def generate_business_overview(llm, answers):
 def categorize_message(llm, message):
     template = """
         You are an AI categorizer that categorizes what the user replies using these 5 categories:
-        1. Question - if the user replies with a question.
+        1. Question - if the user asks a clear question.
         2. Profits - if the user enters a profit.
         3. Expenses - if the user enters an expense.
         4. Profits and Expenses - if the user enters a profit and expense at the same time.
         5. Report - if the user wants to create a report.
-        6. Conversation - if the user message does not fit with the other categories.
+        6. Status - if the user wants to check their business and financial status.
+        7. Loan - if the user wants to check their loan eligibility.
+        8. Conversation - if the user message is not a clear question, just a reaction or greetings.
 
-        Only answer one of these 5 categories. Please answer directly.
+        Only answer one of these 8 categories. Please answer directly.
 
         This is what the user sent: {message}
         """
@@ -107,6 +186,49 @@ def categorize_message(llm, message):
     chain = prompt | llm
     result = chain.invoke({"message": message})
     return result.content
+
+# Function: LLM Chain for Question Answering
+def answer_question(llm, overview, query):
+    relevant_docs = vector_store.similarity_search(query, k=5)
+    context = "\n\n".join([doc.page_content for doc in relevant_docs])
+    template = """
+        You are Yeast AI, an AI that helps small local bakeries in the Philippines manage their finances.
+        Answer only questions related to business, bakeries, and finance.
+
+        This is the business overview of the bakery that you are helping:
+        {overview}
+
+        Answer this question and provide solutions: {query}
+
+        Use this as additional context for your answer:
+        {context}
+
+        Make sure that your answer is simple and easy to understand without too much technical words.
+        """
+    prompt = PromptTemplate.from_template(template)
+    chain = prompt | llm
+    result = chain.invoke({"overview": overview, "query": query, "context": context})
+    return result.content
+
+# Function: Supabase Data Entry
+def save_data(profits, expenses, id):
+    data = {
+        "bakery_id": id,
+        "profits": profits,
+        "expenses": expenses,
+        "date": str(datetime.now().date())
+    }
+    supabase.table("Financial_Record").insert(data).execute()
+
+# Function: Supabase Data Update
+def update_data(profits, expenses, id):
+    data = {
+        "bakery_id": id,
+        "profits": profits,
+        "expenses": expenses,
+        "date": str(datetime.now().date())
+    }
+    supabase.table("Financial_Record").update(data).eq("date", str(datetime.now().date())).execute()
 
 # Function: LLM Chain for User Data Entry
 def data_message(llm, message):
@@ -135,32 +257,24 @@ def data_extract(llm, message):
     result = chain.invoke({"message": message})
     return result.content.replace(" ","").replace("[","").replace("]","")
 
-# Function: LLM Chain for Question Answering
-def answer_question(llm, message):
-    template = """
-        You are Yeast AI, an AI that helps small local bakeries in the Philippines manage their finances.
-        Answer only question related to business, bakeries, and finance.
-        Answer this question like a financial partner of a small local bakery and provide solutions in 2-3 sentences:
-        {message}
-        """
-    prompt = PromptTemplate.from_template(template)
-    chain = prompt | llm
-    result = chain.invoke({"message": message})
-    return result.content
-
 # Function: LLM Chain for Generating Report
-def generate_report(llm, record):
+def generate_report(llm, overview, record):
     template = """
         You are Yeast AI, an AI that helps small local bakeries in the Philippines manage their finances.
+
+        This is the business overview of the bakery that you are helping:
+        {overview}
+        
         Generate a report based on this financial record:
         {record}
 
+        Make sure that your answer is simple and easy to understand without too much technical words.
         Answer only in 2-3 sentences and focus on the important insights.
         Act as if you are giving a small presentation to the user.
         """
     prompt = PromptTemplate.from_template(template)
     chain = prompt | llm
-    result = chain.invoke({"record": record})
+    result = chain.invoke({"overview": overview, "record": record})
     return result.content
 
 # Function: LLM Chain for Generating Business Status
@@ -173,6 +287,7 @@ def generate_status(llm, overview, record):
         Also, use this financial record:
         {record}
 
+        Make sure that your answer is simple and easy to understand without too much technical words.
         Answer only in 2-3 sentences and focus on the important insights.
         Act as if you are giving a small presentation to the user.
         """
@@ -181,18 +296,47 @@ def generate_status(llm, overview, record):
     result = chain.invoke({"overview": overview, "record": record})
     return result.content
 
-# Function: LLM Chain for User Conversation
-def converse(llm, message):
+# Function: LLM Chain for Checking Loan Eligibility
+def loan_check(llm, overview, record):
+    context = """
+            
+            """
     template = """
         You are Yeast AI, an AI that helps small local bakeries in the Philippines manage their finances.
-        Answer only question related to business, bakeries, and finance.
-        Interact with the user like a financial partner of a small local bakery in 1-2 sentences only.
+        Check if the business is eligible for a loan based on this business overview:
+        {overview}
+        
+        And use this financial record:
+        {record}
 
-        This is the user's message: {message}
+        Use this as additional context for your answer:
+        {context}
+
+        Make sure that your answer is simple and easy to understand without too much technical words.
+        Answer only in 2-3 sentences and focus on the important insights.
+        Act as if you are giving a small presentation to the user.
         """
     prompt = PromptTemplate.from_template(template)
     chain = prompt | llm
-    result = chain.invoke({"message": message})
+    result = chain.invoke({"overview": overview, "record": record, "context": context})
+    return result.content
+
+# Function: LLM Chain for User Conversation
+def converse(llm, overview, message):
+    template = """
+        You are Yeast AI, an AI that helps small local bakeries in the Philippines manage their finances.
+        Interact and answer the user's reply like a business partner of a small local bakery.
+
+        This is the business overview of the bakery that you are helping:
+        {overview}
+
+        This is the user's message: {message}
+
+        If the user's message is a reaction or a greeting, just answer in a simple way.
+        """
+    prompt = PromptTemplate.from_template(template)
+    chain = prompt | llm
+    result = chain.invoke({"overview": overview, "message": message})
     return result.content
 
 # Webhook Verification
@@ -203,26 +347,23 @@ def verify():
             return "Verification token missmatch", 403
         return request.args['hub.challenge'], 200
     
-    return "Hello world", 200
+    return "Welcome to Yeast AI!", 200
 
 # Main Route
 @app.route("/", methods=['POST'])
 def webhook():
     data = request.get_json()
 
-    # Loop through the Entries
+    # Loop Through the Entries
     for entry in data['entry']:
         for messaging_event in entry['messaging']:
             sender_id = messaging_event['sender']['id']
 
-            # Check if Event Contains 'message' Key & Page is not the Sender
+            # Check if Event Contains 'message' Key and Page is not the Sender
             if ('message' in messaging_event) and (sender_id != PAGE_ID):
                 message = messaging_event['message'].get('text')
 
                 if message:
-
-                    # Initializing LLM Model
-                    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1, google_api_key=GOOGLE_API_KEY)
 
                     # Sign-up Process
                     code = supabase.table("Bakery").select("*").eq("username", message).execute()
@@ -258,26 +399,31 @@ def webhook():
                         # Categorize the Message
                         category = categorize_message(llm, message).strip().lower()
 
+                        print(category)
+
                         # Process Outputs Based on User Input
                         if category == "question":
-                            bot.send_text_message(sender_id, answer_question(llm, message))
+                            overview_found = supabase.table("Bakery").select("*").eq("bakery_id", sender_id).execute()
+                            if overview_found.data:
+                                overview = overview_found.data[0]["overview"]
+                                bot.send_text_message(sender_id, answer_question(llm, overview, message).replace("* *", "*").replace("*  ", "* "))
                         elif category == "profits":
                             result = data_extract(llm, message)
                             profits = result.split(",")[0]
                             record_found = supabase.table("Financial_Record").select("*").eq("date", str(datetime.now().date())).execute()
                             if record_found.data:
-                                update_data(profits, record_found.data[0]["expenses"])
+                                update_data(profits, record_found.data[0]["expenses"], sender_id)
                             else:
-                                save_data(profits, 0)
+                                save_data(profits, 0, sender_id)
                             bot.send_text_message(sender_id, data_message(llm, message))
                         elif category == "expenses":
                             result = data_extract(llm, message)
                             expenses = result.split(",")[1]
                             record_found = supabase.table("Financial_Record").select("*").eq("date", str(datetime.now().date())).execute()
                             if record_found.data:
-                                update_data(record_found.data[0]["profits"], expenses)
+                                update_data(record_found.data[0]["profits"], expenses, sender_id)
                             else:
-                                save_data(0, expenses)
+                                save_data(0, expenses, sender_id)
                             bot.send_text_message(sender_id, data_message(llm, message))
                         elif category == "profits and expenses":
                             result = data_extract(llm, message)
@@ -285,19 +431,24 @@ def webhook():
                             expenses = result.split(",")[1]
                             record_found = supabase.table("Financial_Record").select("*").eq("date", str(datetime.now().date())).execute()
                             if record_found.data:
-                                update_data(profits, expenses)
+                                update_data(profits, expenses, sender_id)
                             else:
-                                save_data(profits, expenses)
+                                save_data(profits, expenses, sender_id)
                             bot.send_text_message(sender_id, data_message(llm, message))
                         elif category == "report":
-                            record_found = supabase.table("Financial_Record").select("*").eq("bakery_id", sender_id).execute()
-                            if record_found.data:
-                                filtered_data = [{k: v for k, v in row.items() if k != "bakery_id"} for row in record_found.data]
-                                headers = filtered_data[0].keys()
-                                rows = [list(row.values()) for row in filtered_data]
-                                record = tabulate(rows, headers=headers, tablefmt="grid")
-                                print(record)
-                                bot.send_text_message(sender_id, generate_report(llm, record))
+                            overview_found = supabase.table("Bakery").select("*").eq("bakery_id", sender_id).execute()
+                            if overview_found.data:
+                                overview = overview_found.data[0]["overview"]
+                                record_found = supabase.table("Financial_Record").select("*").eq("bakery_id", sender_id).execute()
+                                if record_found.data:
+                                    filtered_data = [{k: v for k, v in row.items() if k != "bakery_id"} for row in record_found.data]
+                                    headers = filtered_data[0].keys()
+                                    rows = [list(row.values()) for row in filtered_data]
+                                    record = tabulate(rows, headers=headers, tablefmt="grid")
+                                    print(record)
+                                    bot.send_text_message(sender_id, generate_report(llm, overview, record))
+                                else:
+                                    bot.send_text_message(sender_id, generate_report(llm, "None"))
                         elif category == "status":
                             overview_found = supabase.table("Bakery").select("*").eq("bakery_id", sender_id).execute()
                             if overview_found.data:
@@ -310,8 +461,27 @@ def webhook():
                                     record = tabulate(rows, headers=headers, tablefmt="grid")
                                     print(record)
                                     bot.send_text_message(sender_id, generate_status(llm, overview, record))
+                                else:
+                                    bot.send_text_message(sender_id, generate_status(llm, overview, "None"))
+                        elif category == "loan":
+                            overview_found = supabase.table("Bakery").select("*").eq("bakery_id", sender_id).execute()
+                            if overview_found.data:
+                                overview = overview_found.data[0]["overview"]
+                                record_found = supabase.table("Financial_Record").select("*").eq("bakery_id", sender_id).execute()
+                                if record_found.data:
+                                    filtered_data = [{k: v for k, v in row.items() if k != "bakery_id"} for row in record_found.data]
+                                    headers = filtered_data[0].keys()
+                                    rows = [list(row.values()) for row in filtered_data]
+                                    record = tabulate(rows, headers=headers, tablefmt="grid")
+                                    print(record)
+                                    bot.send_text_message(sender_id, loan_check(llm, overview, record))
+                                else:
+                                    bot.send_text_message(sender_id, loan_check(llm, overview, "None"))
                         else:
-                            bot.send_text_message(sender_id, converse(llm, message))
+                            overview_found = supabase.table("Bakery").select("*").eq("bakery_id", sender_id).execute()
+                            if overview_found.data:
+                                overview = overview_found.data[0]["overview"]
+                                bot.send_text_message(sender_id, converse(llm, overview, message))
                     else:
                         send_generic_template(sender_id)
             elif 'read' in messaging_event:
