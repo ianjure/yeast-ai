@@ -90,11 +90,6 @@ def document_vector_store(documents):
     vector_store = FAISS.from_documents(split_documents, embeddings)
     return vector_store
 
-# Initialize Knowledge Base (Document)
-pdf_folder = "documents"
-documents = load_documents(pdf_folder)
-doc_vector_store = document_vector_store(documents)
-
 # Initialize Knowledge Base (Website)
 personal_loan_url = 'https://www.banko.com.ph/products/instacashko-personal-loan/'
 negosyoko_loan_url = 'https://www.banko.com.ph/products/fund-your-business-with-banko/'
@@ -110,6 +105,11 @@ try:
     url_vector_store_nl = page_vector_store(content_p2)
 except Exception as e:
     print(e)
+
+# Initialize Knowledge Base (Document)
+pdf_folder = "documents"
+documents = load_documents(pdf_folder)
+doc_vector_store = document_vector_store(documents)
 
 #Function: Send a Generic Message Template
 def send_generic_template(recipient_id):
