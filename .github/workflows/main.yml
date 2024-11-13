@@ -23,7 +23,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install pymessenger supabase
 
-    - name: Send Weekly or Monthly Message
+    - name: Send Weekly or Monthly Report to Users
       env:
         PAGE_ACCESS_TOKEN: ${{ secrets.PAGE_ACCESS_TOKEN }}
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
