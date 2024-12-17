@@ -1,1 +1,1 @@
-Video Presentation: [YEAST AI: Together, We Rise](https://drive.google.com/file/d/1sVbYkPlhiAdn1yr2w-fEBc73TAsmqGbw/view?usp=drive_link)
+Video Presentation: [YEAST AI: Together, We Rise](https://youtu.be/mgEbDyh70bE?si=bgK7SVmqAry0Ih19)
